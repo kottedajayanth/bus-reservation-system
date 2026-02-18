@@ -6,6 +6,7 @@ import java.time.LocalTime;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import com.bus.dto.ReservationRequest;
 import com.bus.model.Bus;
@@ -58,9 +59,10 @@ public class ReservationController {
 		return "reservations/reservation-form";
 	}
 
-	// ================= CREATE (OLD FLOW) =================
+	// ================= CREATE =================
 	@PostMapping
-	public String create(@ModelAttribute ReservationRequest req) {
+	public String create(@ModelAttribute ReservationRequest req,
+			RedirectAttributes redirectAttributes) {
 
 		Bus bus = busService.get(req.getBusId());
 
@@ -75,14 +77,25 @@ public class ReservationController {
 
 		reservationService.create(r);
 
+		redirectAttributes.addFlashAttribute(
+				"message", "Reservation created successfully ✅");
+
 		return "redirect:/reservations";
 	}
 
 	// ================= CANCEL =================
 	@GetMapping("/{id}/cancel")
-	public String cancel(@PathVariable Long id) {
+	public String cancel(@PathVariable Long id,
+			RedirectAttributes redirectAttributes) {
 
-		reservationService.cancel(id);
+		try {
+			reservationService.cancel(id);
+			redirectAttributes.addFlashAttribute(
+					"message", "Reservation cancelled successfully.");
+		} catch (RuntimeException ex) {
+			redirectAttributes.addFlashAttribute(
+					"error", ex.getMessage());
+		}
 
 		return "redirect:/reservations";
 	}
@@ -95,25 +108,28 @@ public class ReservationController {
 			@RequestParam String source,
 			@RequestParam String destination,
 			@RequestParam(required = false) String seatsRequested,
-			Model model) {
+			Model model,
+			RedirectAttributes redirectAttributes) {
 
 		LocalDate selectedDate = LocalDate.parse(date);
 		LocalDate today = LocalDate.now();
 
+		// DATE VALIDATION
 		if (selectedDate.isBefore(today)) {
-			model.addAttribute("error",
-					"Past date booking is not allowed.");
+			redirectAttributes.addFlashAttribute(
+					"warning", "Past date booking is not allowed.");
 			return "redirect:/buses";
 		}
 
 		LocalTime selectedTime = LocalTime.parse(time);
 		LocalTime now = LocalTime.now();
 
+		// TIME VALIDATION
 		if (selectedDate.equals(today)
 				&& selectedTime.isBefore(now)) {
 
-			model.addAttribute("error",
-					"Cannot book past time today.");
+			redirectAttributes.addFlashAttribute(
+					"warning", "Cannot book past time today.");
 			return "redirect:/buses";
 		}
 
@@ -145,89 +161,98 @@ public class ReservationController {
 			@RequestParam String paymentMethod,
 			@RequestParam String paymentIdentity,
 			HttpSession session,
-			Model model) {
+			Model model,
+			RedirectAttributes redirectAttributes) {
 
+		// ===== LOGIN CHECK =====
 		User user = (User) session.getAttribute("user");
-		if (user == null)
-			return "redirect:/auth/login-user";
 
+		if (user == null) {
+			redirectAttributes.addFlashAttribute(
+					"warning",
+					"Please login before completing payment.");
+			return "redirect:/auth/login-user";
+		}
+
+		// ===== DATE VALIDATION =====
 		LocalDate selectedDate = LocalDate.parse(date);
 		LocalDate today = LocalDate.now();
 
 		if (selectedDate.isBefore(today)) {
-			model.addAttribute("error",
+			redirectAttributes.addFlashAttribute(
+					"warning",
 					"Past date booking is not allowed.");
 			return "redirect:/buses";
 		}
 
+		// ===== TIME VALIDATION =====
 		LocalTime selectedTime = LocalTime.parse(time);
 		LocalTime now = LocalTime.now();
 
-		if (selectedDate.equals(today)
-				&& selectedTime.isBefore(now)) {
-
-			model.addAttribute("error",
+		if (selectedDate.equals(today) && selectedTime.isBefore(now)) {
+			redirectAttributes.addFlashAttribute(
+					"warning",
 					"Cannot book past time today.");
+			return "redirect:/buses";
+		}
+
+		// ===== PAYMENT VALIDATION =====
+		if (paymentMethod == null || paymentMethod.isBlank()) {
+			redirectAttributes.addFlashAttribute(
+					"error",
+					"Payment failed. Try again.");
 			return "redirect:/buses";
 		}
 
 		Bus bus = busService.get(busId);
 
-		boolean success = paymentMethod != null && !paymentMethod.isBlank();
-
-		if (!success) {
-
-			model.addAttribute("error",
-					"Payment failed. Try again.");
-
-			model.addAttribute("bus", bus);
-			model.addAttribute("date", date);
-			model.addAttribute("time", time);
-			model.addAttribute("source", source);
-			model.addAttribute("destination", destination);
-			model.addAttribute("seatsRequested", seatsRequested);
-			model.addAttribute("priceTotal", bus.getPrice());
-
-			return "reservations/payment";
-		}
-
 		int passengers = Integer.parseInt(seatsRequested);
 
-		Reservation r = reservationService.book(
+		// ===== BOOK =====
+		reservationService.book(
 				user,
 				bus,
-				LocalDate.parse(date),
+				selectedDate,
 				time,
 				source,
 				destination,
 				passengers);
 
-		model.addAttribute("reservation", r);
-		model.addAttribute("user", user);
+		// ✅ SUCCESS TOAST
+		redirectAttributes.addFlashAttribute(
+				"message",
+				"Booking confirmed successfully!");
 
-		return "reservations/reservation-details";
+		// IMPORTANT → redirect (not JSP return)
+		return "redirect:/reservations";
 	}
 
 	// ================= JOURNEY START =================
 	@PostMapping("/start/{id}")
-	public String startJourney(@PathVariable Long id) {
+	public String startJourney(@PathVariable Long id,
+			RedirectAttributes redirectAttributes) {
 
 		Reservation res = reservationService.get(id);
 		res.setJourneyStarted(true);
-
 		reservationService.save(res);
+
+		redirectAttributes.addFlashAttribute(
+				"message", "Journey started 🚍");
 
 		return "redirect:/reservations";
 	}
 
 	// ================= JOURNEY END =================
 	@PostMapping("/end/{id}")
-	public String endJourney(@PathVariable Long id) {
+	public String endJourney(@PathVariable Long id,
+			RedirectAttributes redirectAttributes) {
 
 		Reservation res = reservationService.get(id);
 		res.setJourneyEnded(true);
-
 		reservationService.save(res);
+
+		redirectAttributes.addFlashAttribute(
+				"message", "Journey completed successfully.");
 
 		return "redirect:/feedback/new/" + id;
 	}
