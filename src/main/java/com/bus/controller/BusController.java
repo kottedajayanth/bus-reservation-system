@@ -1,22 +1,16 @@
 package com.bus.controller;
 
-import java.time.DayOfWeek;
-import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.*;
 
 import com.bus.model.Bus;
 import com.bus.model.Route;
+import com.bus.service.BusAvailabilityService;
 import com.bus.service.BusService;
 import com.bus.service.RouteService;
 
@@ -26,10 +20,17 @@ public class BusController {
 
 	private final BusService busService;
 	private final RouteService routeService;
+	private final BusAvailabilityService availabilityService;
 
-	public BusController(BusService busService, RouteService routeService) {
+	// ================= CONSTRUCTOR =================
+	public BusController(
+			BusService busService,
+			RouteService routeService,
+			BusAvailabilityService availabilityService) {
+
 		this.busService = busService;
 		this.routeService = routeService;
+		this.availabilityService = availabilityService;
 	}
 
 	// ================= LIST BUSES =================
@@ -42,34 +43,15 @@ public class BusController {
 				? busService.searchByRoute(from, to)
 				: busService.listAll();
 
-		model.addAttribute("buses", buses);
-
-		// ===== BOSS STEP-3 : RUNNING STATUS =====
+		// ===== SBSS STEP-1 : Availability Engine =====
 		Map<Long, String> runningStatus = new HashMap<>();
 
-		DayOfWeek today = LocalDate.now().getDayOfWeek();
-		DayOfWeek tomorrow = today.plus(1);
-
-		for (Bus b : buses) {
-
-			String days = b.getRunningDays();
-
-			if (days == null || days.isBlank())
-				continue;
-
-			String todayCode = today.name().substring(0, 3);
-			String tomorrowCode = tomorrow.name().substring(0, 3);
-
-			if (days.contains(todayCode)) {
-				runningStatus.put(b.getBusId(), "TODAY");
-			} else if (days.contains(tomorrowCode)) {
-				runningStatus.put(b.getBusId(), "TOMORROW");
-			} else {
-				String next = days.split(",")[0];
-				runningStatus.put(b.getBusId(), "NEXT " + next);
-			}
+		for (Bus bus : buses) {
+			String label = availabilityService.getAvailabilityLabel(bus);
+			runningStatus.put(bus.getBusId(), label);
 		}
 
+		model.addAttribute("buses", buses);
 		model.addAttribute("runningStatus", runningStatus);
 
 		return "buses/bus-list";
